@@ -48,6 +48,8 @@ const (
 	KindDaemonSet             Kind = "DaemonSet"
 	KindCronJob               Kind = "CronJob"
 	KindJob                   Kind = "Job"
+	KindService               Kind = "Service"
+	KindConfigMap             Kind = "ConfigMap"
 )
 
 // IsBuiltInWorkload returns true if the specified v1.OwnerReference
@@ -128,6 +130,28 @@ func GetPartialObjectFromKindAndNamespacedName(kind Kind, name types.NamespacedN
 	}
 }
 
+// ComputeSpecHash computes hash of the specified K8s client.Object.
+// The hash is used to indicate whether the client.Object should be
+// rescanned or not by adding it as a label to an instance of security
+// report.
+// TODO Brainstorm how we compute hash for Services, ConfigMaps, and other objects.
+func ComputeSpecHash(obj client.Object) (string, error) {
+	switch t := obj.(type) {
+	case *corev1.Pod, *appsv1.Deployment, *appsv1.ReplicaSet, *corev1.ReplicationController, *appsv1.StatefulSet, *appsv1.DaemonSet, *batchv1beta1.CronJob, *batchv1.Job:
+		spec, err := GetPodSpec(obj)
+		if err != nil {
+			return "", err
+		}
+		return ComputeHash(spec), nil
+	case *corev1.Service:
+		return ComputeHash((obj.(*corev1.Service)).Spec), nil
+	case *corev1.ConfigMap:
+		return ComputeHash(obj), nil
+	default:
+		return "", fmt.Errorf("computing spec hash of unsupported object: %T", t)
+	}
+}
+
 // GetPodSpec returns v1.PodSpec from the specified Kubernetes
 // client.Object. Returns error if the given client.Object
 // is not a Kubernetes workload.
@@ -177,6 +201,10 @@ func (o *ObjectResolver) GetObjectFromPartialObject(ctx context.Context, workloa
 		obj = &batchv1beta1.CronJob{}
 	case KindJob:
 		obj = &batchv1.Job{}
+	case KindService:
+		obj = &corev1.Service{}
+	case KindConfigMap:
+		obj = &corev1.ConfigMap{}
 	default:
 		return nil, fmt.Errorf("unknown kind: %s", workload.Kind)
 	}
